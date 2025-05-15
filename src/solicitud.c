@@ -14,8 +14,7 @@ void mostrar_menu() {
     printf("1. Solicitar préstamo de un libro (P)\n");
     printf("2. Renovar un libro (R)\n");
     printf("3. Devolver un libro (D)\n");
-    printf("4. Generar reporte de libros (t)\n");
-    printf("5. Salir (s)\n");
+    printf("4. Salir (s)\n");
     printf("Seleccione una opción: ");
 }
 
@@ -33,19 +32,19 @@ Solicitud leer_solicitud_teclado() {
 
     switch(opcion) {
         case '1':
-            //enviar el texto del prestamo recibido 
-            s.operacion = 'P';//prestamo
+            s.operacion = 'P';
             break;
         case '2':
-            s.operacion = 'R';//renovacion
+            s.operacion = 'R';
             break;
         case '3':
-            s.operacion = 'D';//devolucion
+            s.operacion = 'D';
             break;
         case '4':
-            s.operacion = 't';//reporte            
+            s.operacion = 's';
+            return s;
         case '5':
-            s.operacion = 's';//salir
+            s.operacion = 't';
             return s;
         default:
             printf("Opción no válida. Intente nuevamente.\n");
@@ -60,6 +59,7 @@ Solicitud leer_solicitud_teclado() {
     }
     return s;
 }
+
 
 // Función para enviar una solicitud al receptor (RP)
 void enviar_solicitud(int pipe_fd, Solicitud solicitud) {
@@ -101,13 +101,11 @@ int main(int argc, char *argv[]) {
     // Leer solicitudes desde el archivo de entrada en caso de que se haya proporcionado
     if(input_file != NULL) {
         FILE *file = fopen(input_file, "r");
-        
         if (file == NULL) {
             perror("Error al abrir el archivo de entrada");
             close(pipe_fd);
             exit(EXIT_FAILURE);
         }
-        // Leer solicitudes del archivo
         Solicitud s;
         while (fscanf(file," %c, %49[^,], %9s" , &s.operacion,s.nombreLibro, s.codigo) == 3) {
             if(s.operacion == 'Q') {
@@ -124,6 +122,9 @@ int main(int argc, char *argv[]) {
             s = leer_solicitud_teclado();
             enviar_solicitud(pipe_fd, s);
         } while (s.operacion != 's');
+    
+
+
     // Cerrar el pipe
     close(pipe_fd); 
     return 0;
