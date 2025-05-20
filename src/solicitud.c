@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
+#include <unistd.h> 
 
 typedef struct {
     char nombreLibro[50];
@@ -15,6 +16,7 @@ void mostrar_menu() {
     printf("2. Renovar un libro (R)\n");
     printf("3. Devolver un libro (D)\n");
     printf("4. Salir (s)\n");
+    printf("5. Mostrar reporte (t)\n");
     printf("Seleccione una opción: ");
 }
 
@@ -61,11 +63,13 @@ Solicitud leer_solicitud_teclado() {
 }
 
 
-// Función para enviar una solicitud al receptor (RP)
+// Función para enviar una solicitud al receptor (RP) y esperar respuesta
 void enviar_solicitud(int pipe_fd, Solicitud solicitud) {
-    write(pipe_fd, &solicitud, sizeof(Solicitud));
+    if (write(pipe_fd, &solicitud, sizeof(Solicitud)) == -1) {
+        perror("Error al escribir en el pipe");
+    }
+    printf("Solicitud enviada: %c, %s, %s\n", solicitud.operacion, solicitud.nombreLibro, solicitud.codigo);
 }
-
 
 int main(int argc, char *argv[]) {
 
@@ -92,15 +96,18 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Crear el pipe
-    int pipe_fd = open(nombre_pipe, O_WRONLY);
+    // Crear el pipe en modo lectura o escritura
+    int pipe_fd = open(nombre_pipe,  O_RDWR);   
+    
     if (pipe_fd == -1) {
         perror("Error al abrir el pipe");
         exit(EXIT_FAILURE);
     }
     // Leer solicitudes desde el archivo de entrada en caso de que se haya proporcionado
+   
     if(input_file != NULL) {
         FILE *file = fopen(input_file, "r");
+        printf("existe un archivo de entrada\n");
         if (file == NULL) {
             perror("Error al abrir el archivo de entrada");
             close(pipe_fd);
@@ -111,6 +118,7 @@ int main(int argc, char *argv[]) {
             if(s.operacion == 'Q') {
                 break;
             }else{
+            printf("\nse envio la solicitud\n");    
             enviar_solicitud(pipe_fd, s);
         }
         }
@@ -119,13 +127,13 @@ int main(int argc, char *argv[]) {
     //menu para leer solicitudes desde el teclado
         Solicitud s;
         do {
-            s = leer_solicitud_teclado();
+            s = leer_solicitud_teclado();              
             enviar_solicitud(pipe_fd, s);
         } while (s.operacion != 's');
     
 
 
     // Cerrar el pipe
-    close(pipe_fd); 
+    close(pipe_fd);  // Usa close() en lugar de pclose()
     return 0;
 }
