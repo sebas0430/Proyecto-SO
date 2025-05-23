@@ -132,7 +132,7 @@ void* hilo_auxiliar01(void* arg) {
 }
 
 // esta función busca el libro en el archivo y devuelve la información del libro, es decir, la línea del encabezado, la cantidad de ejemplares y la línea del ejemplar con el estado objetivo
-InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char estado_objetivo) {
+InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char estado_objetivo) { // file es el archivo de la base de datos, nombre es el nombre del libro, isbn es el ISBN del libro y estado_objetivo es el estado que se busca
     char linea[256]; // buffer para almacenar la línea leída del archivo
     InfoLibro info = {-1, 0, -1}; // inicializar la información del libro
     int linea_actual = 0; // contador de líneas leídas
@@ -242,7 +242,7 @@ int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo) {
             int offset_fecha = ultima_coma - linea + 2; // Salto ", " y posiciono al inicio de la fecha
 
             fseek(archivo, pos_inicio + offset_fecha, SEEK_SET); // mover el puntero al inicio de la fecha
-            fprintf(archivo, "%s\n", nueva_fecha);// sobrescribir la fecha
+            fprintf(archivo, "%s \n", nueva_fecha);// sobrescribir la fecha
             fflush(archivo); // forzar la escritura en el archivo
             return 1;
         }
@@ -386,9 +386,33 @@ int main(int argc, char *argv[]) {
                 /*borrar*/printf("Solicitud de renovacion almacenada en el buffer. ISBN: %d\n", solicitud.isbn); // imprimir mensaje de confirmación
                 sem_post(&acceso_buffer); // liberar el acceso al buffer
                 sem_post(&solicitudes_pendientes); // indicar que hay una solicitud pendiente
-            } 
-
-        }
+            } else if(solicitud.operacion == 'P'){
+                char mensaje[256];
+                snprintf(mensaje, sizeof(mensaje), "Solicitud de prestamo recibida para el libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
+                write_bytes = write(fd_respuesta, mensaje, strlen(mensaje));
+                if (write_bytes == -1) { // si no se pudo escribir en el pipe que salga una advertencia
+                    perror("Error al escribir en el pipe");
+                    exit(EXIT_FAILURE);
+                }
+                InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'D'); // buscar información del libro 
+                if(cambiar_estado_libro(archivo_entrada,info.linea_ejemplar_estado,'P') == 1 ){
+                    printf("Prestamo exitoso del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn); // imprimir mensaje de confirmación
+                    char respuesta[256]; // buffer para almacenar la respuesta
+                    snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue prestado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn); // formatear la respuesta en caso de éxito
+                    int fd_respuesta = open("/tmp/pipe_respuesta", O_WRONLY); // abrir el pipe de respuesta
+                    if (fd_respuesta != -1) { // si se pudo abrir el pipe, que escriba la respuesta
+                        write(fd_respuesta, respuesta, strlen(respuesta));
+                        close(fd_respuesta); // cerrar el pipe de respuesta
+                    }
+                }
+                       
+                    }
+            }
+    
+        // Esperar a que el hilo termine
+        pthread_join(hilo01, NULL); // esperar a que el hilo termine
+        printf("Hilo auxiliar01 terminado.\n");
+        
     
     //liberar recursos
     close(fd_respuesta); // cerrar el pipe de respuesta

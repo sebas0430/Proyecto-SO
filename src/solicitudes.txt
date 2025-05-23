@@ -1,7 +1,0 @@
-P, Operating Systems, 2233
-D, Alicia en el País de las Maravillas, 2133
-R, Hamlet, 234
-R, Historia de Colombia, 223
-P, Cálculo Diferencial, 120
-P, Algebra Lineal, 111
-Q, Salir, 0

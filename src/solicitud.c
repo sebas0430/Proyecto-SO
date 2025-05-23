@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 
 typedef struct {
-    char operacion; // 'P', 'D', etc.
+    char operacion; // 'P', 'D', 'R', 'Q'
     char nombre_libro[50];
     int isbn;
 } Solicitud;
@@ -16,6 +16,7 @@ void mostrar_menu() {
     printf("1. Solicitar préstamo de un libro (P)\n");
     printf("2. Renovar un libro (R)\n");
     printf("3. Devolver un libro (D)\n");
+    printf("4. Salir(Q)\n");
     printf("Seleccione una opción: ");
 }
 
@@ -29,11 +30,12 @@ Solicitud leer_solicitud_teclado() {
         case '1': s.operacion = 'P'; break;
         case '2': s.operacion = 'R'; break;
         case '3': s.operacion = 'D'; break;
+        case '4': s.operacion = 'Q'; break;
         default:
             printf("Opción no válida. Intente nuevamente.\n");
             return leer_solicitud_teclado();
     }
-
+    if(s.operacion == 'Q') return s;
     printf("Ingrese el nombre del libro: ");
     scanf(" %[^\n]", s.nombre_libro);
     printf("Ingrese el código del libro: ");
@@ -93,10 +95,19 @@ int main(int argc, char *argv[]) {
         }
 
         Solicitud s;
-        while (fscanf(file," %c, %49[^,], %d", &s.operacion, s.nombre_libro, &s.isbn) == 3) {
-            if (s.operacion == 'Q') break;
-            enviar_solicitud(pipe_fd, s);
+        char linea[128];
+        while (fgets(linea, sizeof(linea), file)) {
+            if (sscanf(linea, " %c , %49[^,] , %d", &s.operacion, s.nombre_libro, &s.isbn) == 3) {
+                printf("Enviando solicitud de %c para libro '%s' con código %d...\n", s.operacion, s.nombre_libro, s.isbn);
+                if (s.operacion == 'Q') break;
+                s.nombre_libro[0] = '\0';  // Limpiar el nombre del libro
+                s.isbn = 0;
+                enviar_solicitud(pipe_fd, s);
+            } else {
+                fprintf(stderr, "Línea malformada: %s", linea);  // Debug útil
+            }
         }
+        
         fclose(file);
     } else {
         Solicitud s;
