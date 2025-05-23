@@ -255,35 +255,35 @@ int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo) {
 //MAIN 
 int main(int argc, char *argv[]) {
     char fifo_respuesta[50] = "/tmp/pipe_respuesta";
-    char* nombre_pipe = NULL;
-    char* nombre_archivo = NULL;
+    char* nombre_pipe = NULL; // nombre del pipe de solicitud
+    char* nombre_archivo = NULL; // nombre del archivo de la base de datos
     int verbose = 0;
-    Solicitud solicitud;
+    Solicitud solicitud; // variable para almacenar la solicitud leída del pipe
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-p") == 0 && i + 1 < argc)
-            nombre_pipe = argv[++i];
-        else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc)
-            nombre_archivo = argv[++i];
-        else if (strcmp(argv[i], "-v") == 0)
-            verbose = 1;
+        if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) // si se encuentra la opción -p
+            nombre_pipe = argv[++i]; // asignar el nombre del pipe
+        else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) // si se encuentra la opción -f
+            nombre_archivo = argv[++i]; // asignar el nombre del archivo
+        else if (strcmp(argv[i], "-v") == 0) // si se encuentra la opción -v
+            verbose = 1; // asignar el modo verbose
     }
 
-    if (!nombre_pipe || !nombre_archivo) {
+    if (!nombre_pipe || !nombre_archivo) { // en caso de que no se haya pasado el nombre del pipe o del archivo
         fprintf(stderr, "Uso: %s -p <pipe> -f <archivo_BD>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
     char fifo_file[64];
-    snprintf(fifo_file, sizeof(fifo_file), "/tmp/%s", nombre_pipe);
+    snprintf(fifo_file, sizeof(fifo_file), "/tmp/%s", nombre_pipe); // crear la ruta del pipe de solicitud
 
     // Crear pipes si no existen
     printf("Creando pipes...\n");
-    if (access(fifo_file, F_OK) == -1 && mkfifo(fifo_file, 0660) == -1) {
+    if (access(fifo_file, F_OK) == -1 && mkfifo(fifo_file, 0660) == -1) { // verificar si el pipe de solicitud existe, si no existe crearlo
         perror("Error al crear pipe de solicitud");
         exit(EXIT_FAILURE);
     }
-    if (access(fifo_respuesta, F_OK) == -1 && mkfifo(fifo_respuesta, 0660) == -1) {
+    if (access(fifo_respuesta, F_OK) == -1 && mkfifo(fifo_respuesta, 0660) == -1) { // verificar si el pipe de respuesta existe, si no existe crearlo
         perror("Error al crear pipe de respuesta");
         exit(EXIT_FAILURE);
     }
@@ -413,7 +413,7 @@ int main(int argc, char *argv[]) {
         pthread_join(hilo01, NULL); // esperar a que el hilo termine
         printf("Hilo auxiliar01 terminado.\n");
         
-    
+    // prueba
     //liberar recursos
     close(fd_respuesta); // cerrar el pipe de respuesta
     close(fd); // cerrar el pipe de solicitudes
