@@ -9,7 +9,8 @@
 #include <semaphore.h>
 
 
-#define BUFFER_SIZE 10
+#define BUFFER_SIZE 10 // tamaño del buffer de solicitudes
+#define MAX_MOVIMIENTOS 1000 // máximo número de movimientos de libros
 
 //declaracion de estructuras
 typedef struct {
@@ -31,13 +32,27 @@ typedef struct {
     int fd_respuesta; // descriptor de archivo para el pipe de respuesta
 } Datos_hilo; // estructura para pasar datos a los hilos 
 
+typedef struct {
+    char operacion; // 'P', 'R', 'D'
+    char nombre_libro[50];
+    int isbn;
+    int ejemplar;
+    char fecha[20];
+} Movimiento;
+
 //declaracion de variables globales como el buffer, semáforos y variables de control
 Solicitud Buffer[BUFFER_SIZE]; // buffer para almacenar las solicitudes
+Movimiento movimientos[MAX_MOVIMIENTOS]; // buffer para almacenar los movimientos de libros
+int num_movimientos = 0; // contador de movimientos de libros
 int in = 0; // indice de entrada
 int out = 0; // indice de salida
+
+pthread_mutex_t mutex_movimientos = PTHREAD_MUTEX_INITIALIZER; // mutex para proteger el acceso al buffer de movimientos
+
 sem_t espacios_disponibles; // semaforo para controlar los espacios disponibles en el buffer
 sem_t solicitudes_pendientes; // semaforo para controlar las solicitudes que estan en la lista
 sem_t acceso_buffer; // semaforo para controlar el acceso al buffer
+
 
 
 //declaración de funciones
@@ -46,6 +61,8 @@ void* hilo_auxiliar02(void* arg); // declaración de la función del hilo auxili
 InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char estado_objetivo); // declaración de la función para buscar información del libro
 int cambiar_estado_libro(FILE *archivo, int numero_linea, char nuevo_estado); // declaración de la función para actualizar el estado de un libro segun la línea 
 int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo); // declaración de la función para actualizar la fecha de un libro segun la solicitud
+void registrar_movimiento(char operacion, const char* nombre, int isbn, int ejemplar, const char* fecha); // declaración de la función para registrar un movimiento de libro
+
 
 
 
@@ -71,6 +88,13 @@ void* hilo_auxiliar01(void* arg) {
             InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P'); // buscar información del libro
             if(cambiar_estado_libro(archivo_entrada,info.linea_ejemplar_estado,'D') == 1 ){
                 actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 0); // actualizar la fecha de devolución
+                
+                // Registrar el movimiento de devolución
+                char fecha[20]; // buffer para almacenar la fecha
+                time_t t = time(NULL); // obtener la fecha y hora actual
+                strftime(fecha, sizeof(fecha), "%d-%m-%Y", localtime(&t)); // formatear la fecha
+                registrar_movimiento('D', solicitud.nombre_libro, solicitud.isbn, info.linea_ejemplar_estado - info.linea_encabezado, fecha); // registrar el movimiento de devolución
+
                 printf("Devolución exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn); // imprimir mensaje de confirmación
                 char respuesta[256]; // buffer para almacenar la respuesta
                 snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue devuelto exitosamente.\n", solicitud.nombre_libro, solicitud.isbn); // formatear la respuesta en caso de éxito
@@ -79,6 +103,7 @@ void* hilo_auxiliar01(void* arg) {
                     write(fd_respuesta, respuesta, strlen(respuesta));
                     close(fd_respuesta); // cerrar el pipe de respuesta
                 }
+
             }else{
                 char respuesta[256];
                 snprintf(respuesta, sizeof(respuesta), "Error al devolver el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn); // formatear la respuesta en caso de error 
@@ -101,6 +126,14 @@ void* hilo_auxiliar01(void* arg) {
         if (solicitud.operacion == 'R') { // si la operación es 'R' (Renovar)
             InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P'); // buscar información del libro
             if(actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 1) == 1){// actualizar la fecha de renovación
+
+                char fecha[20]; // buffer para almacenar la fecha
+                time_t t = time(NULL); // obtener la fecha y hora actual
+                t += 7 * 24 * 3600; // Sumar 7 días
+                strftime(fecha, sizeof(fecha), "%d-%m-%Y", localtime(&t)); // formatear la fecha
+                registrar_movimiento('R', solicitud.nombre_libro, solicitud.isbn, info.linea_ejemplar_estado - info.linea_encabezado, fecha); // registrar el movimiento de renovación
+
+
                 printf("Renovacion exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn); // imprimir mensaje de confirmación
                 char respuesta[256]; // buffer para almacenar la respuesta
                 snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue renovado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn); // formatear la respuesta en caso de éxito
@@ -131,6 +164,49 @@ void* hilo_auxiliar01(void* arg) {
     return NULL;
 }
 
+void* hilo_auxiliar02(void* arg) {
+    Datos_hilo* datos = (Datos_hilo*)arg;
+    //FILE* archivo = datos->archivo_entrada;
+    char comando[10];
+
+    while (datos->ejecucion) {
+        printf("Ingrese comando (s=salir, r=reporte): ");
+        if (fgets(comando, sizeof(comando), stdin) == NULL)
+            continue;
+
+        if (comando[0] == 's') {
+            printf("Comando 's' recibido. Terminando ejecución...\n");
+            datos->ejecucion = 0;
+            return NULL; // Terminar el hilo
+            // Liberar un espacio por si el hilo principal está esperando
+            sem_post(&solicitudes_pendientes);
+            break;
+        } else if (comando[0] == 'r') {
+
+            if (num_movimientos == 0) { // verificar si hay movimientos para mostrar
+                printf("No hay movimientos registrados.\n");
+                continue;
+            }else{
+            printf("== REPORTE DE MOVIMIENTOS DE LIBROS ==\n");
+            for(int i = 0; i < num_movimientos; i++) { // imprimir los movimientos de libros
+                printf("Operacion: %c, Libro: %s, ISBN: %d, Ejemplar: %d, Fecha: %s\n",
+                    movimientos[i].operacion,
+                    movimientos[i].nombre_libro,
+                    movimientos[i].isbn,
+                    movimientos[i].ejemplar,
+                    movimientos[i].fecha);
+            }
+            printf("====================================\n");
+            }
+        } else {
+            printf("Comando no reconocido.\n");
+        }
+    }
+
+    return NULL;
+}
+
+
 // esta función busca el libro en el archivo y devuelve la información del libro, es decir, la línea del encabezado, la cantidad de ejemplares y la línea del ejemplar con el estado objetivo
 InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char estado_objetivo) { // file es el archivo de la base de datos, nombre es el nombre del libro, isbn es el ISBN del libro y estado_objetivo es el estado que se busca
     char linea[256]; // buffer para almacenar la línea leída del archivo
@@ -157,12 +233,13 @@ InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char es
                         if (sscanf(linea, " %*[^,], %c,", &estado) == 1) { // leer el estado del ejemplar
                             if (estado == estado_objetivo && info.linea_ejemplar_estado == -1) { // si el estado coincide con el objetivo y no se ha encontrado otro ejemplar con ese estado
                                 info.linea_ejemplar_estado = linea_actual; // guardar la línea del ejemplar con el estado objetivo
+                            } else if (estado != estado_objetivo && info.linea_ejemplar_estado == -1) { // si el estado no coincide con el objetivo y no se ha encontrado otro ejemplar con ese estado
+                                info.linea_ejemplar_estado = -1; // no se encontró el libro con el estado objetivo
                             }
-                        }
+                        }                    
                     }
-                }
-
-                return info; // ya encontró el libro
+                } 
+            return info; // ya encontró el libro
             } else {
                 // Saltar las líneas de ejemplares si no es el libro deseado
                 for (int i = 0; i < cantidad_bd; i++) {
@@ -172,7 +249,7 @@ InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char es
             }
         }
     }
-    return info; // si no lo encontró, .linea_encabezado == -1 es decir que no se encontró el libro
+    return info; // si no se encontró el libro, devolver la información inicializada
 }
 
 // Sobrescribe el estado en una línea específica
@@ -249,6 +326,21 @@ int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo) {
     }
     return 0;
 }
+
+
+void registrar_movimiento(char operacion, const char* nombre, int isbn, int ejemplar, const char* fecha) {
+    pthread_mutex_lock(&mutex_movimientos);
+    if (num_movimientos < MAX_MOVIMIENTOS) { // verificar si hay espacio en el buffer de movimientos
+        movimientos[num_movimientos].operacion = operacion;
+        strncpy(movimientos[num_movimientos].nombre_libro, nombre, 50);
+        movimientos[num_movimientos].isbn = isbn;
+        movimientos[num_movimientos].ejemplar = ejemplar;
+        strncpy(movimientos[num_movimientos].fecha, fecha, 20);
+        num_movimientos++;
+    }
+    pthread_mutex_unlock(&mutex_movimientos);
+}
+
 
 /*=======================================================================================================================================*/
 
@@ -332,6 +424,11 @@ int main(int argc, char *argv[]) {
             perror("Error al crear el hilo");
             exit(EXIT_FAILURE);
         }
+        pthread_t hilo02; // variable para almacenar el identificador del hilo
+        if (pthread_create(&hilo02, NULL, hilo_auxiliar02, (void*)&datos_hilo01) != 0) {
+            perror("Error al crear el hilo auxiliar 2");
+            exit(EXIT_FAILURE);
+        }
         
         while(ejecucion) { // bucle infinito para leer del pipe
             read_bytes = read(fd, &solicitud, sizeof(Solicitud)); // leer del pipe
@@ -395,7 +492,20 @@ int main(int argc, char *argv[]) {
                     exit(EXIT_FAILURE);
                 }
                 InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'D'); // buscar información del libro 
-                if(cambiar_estado_libro(archivo_entrada,info.linea_ejemplar_estado,'P') == 1 ){
+                printf("la linea del encabezado es %d\n", info.linea_encabezado);
+                printf("la cantidad de ejemplares es %d\n", info.cantidad_ejemplares);
+                printf("la linea del ejemplar es %d\n", info.linea_ejemplar_estado);
+                if(info.linea_ejemplar_estado != -1){
+
+                    cambiar_estado_libro(archivo_entrada,info.linea_ejemplar_estado,'P');
+                    // Registrar movimiento
+                    time_t t = time(NULL);
+                    struct tm fecha = *localtime(&t);
+                    char fecha_str[20];
+                    strftime(fecha_str, sizeof(fecha_str), "%d-%m-%Y", &fecha); 
+
+                    int ejemplar = info.linea_ejemplar_estado - info.linea_encabezado;
+                    registrar_movimiento('P', solicitud.nombre_libro, solicitud.isbn, ejemplar, fecha_str);
                     printf("Prestamo exitoso del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn); // imprimir mensaje de confirmación
                     char respuesta[256]; // buffer para almacenar la respuesta
                     snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue prestado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn); // formatear la respuesta en caso de éxito
@@ -403,17 +513,31 @@ int main(int argc, char *argv[]) {
                     if (fd_respuesta != -1) { // si se pudo abrir el pipe, que escriba la respuesta
                         write(fd_respuesta, respuesta, strlen(respuesta));
                         close(fd_respuesta); // cerrar el pipe de respuesta
-                    }
-                }
-                       
+                    }   
+                }else {
+                    printf("No hay ejemplares disponibles para el libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn); // imprimir mensaje de error
+                    char respuesta[256]; // buffer para almacenar la respuesta
+                    snprintf(respuesta, sizeof(respuesta), "No hay ejemplares disponibles para el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn); // formatear la respuesta en caso de error
+                    int fd_respuesta = open("/tmp/pipe_respuesta", O_WRONLY); // abrir el pipe de respuesta
+                    if (fd_respuesta != -1) { // si se pudo abrir el pipe, que escriba la respuesta
+                        write(fd_respuesta, respuesta, strlen(respuesta));
+                        close(fd_respuesta); // cerrar el pipe de respuesta
+                    } else {
+                        perror("Error al abrir el pipe de respuesta");
+                        exit(EXIT_FAILURE);
+                }    
+                    sem_post(&acceso_buffer);
+                    sem_post(&espacios_disponibles);
+                   
                     }
             }
     
         // Esperar a que el hilo termine
         pthread_join(hilo01, NULL); // esperar a que el hilo termine
+        pthread_join(hilo02, NULL);
         printf("Hilo auxiliar01 terminado.\n");
         
-    // prueba
+    
     //liberar recursos
     close(fd_respuesta); // cerrar el pipe de respuesta
     close(fd); // cerrar el pipe de solicitudes
@@ -424,4 +548,5 @@ int main(int argc, char *argv[]) {
     sem_destroy(&solicitudes_pendientes); // destruir el semáforo de solicitudes pendientes
     sem_destroy(&acceso_buffer); // destruir el semáforo de acceso al buffer
     return 0;
+    }
 }
