@@ -54,7 +54,6 @@ void* hilo_auxiliar01(void* arg) {
     Datos_hilo* datos = (Datos_hilo*)arg; // convertir el argumento a la estructura de datos
     FILE* archivo_entrada = datos->archivo_entrada; // obtener el puntero al archivo de la base de datos
     //FILE* archivo_salida = datos->archivo_salida; // obtener el puntero al archivo de salida
-    //int write_bytes;
 
     while(datos->ejecucion) { // bucle infinito para procesar las solicitudes
 
