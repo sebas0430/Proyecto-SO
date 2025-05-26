@@ -9,9 +9,10 @@
 #include <semaphore.h>
 
 #define BUFFER_SIZE 10
+#define MAX_OPERACIONES 1000
 
 typedef struct {
-    char operacion; // 'Q', 'P', 'D', 'R'
+    char operacion; // 'Q', 'P', 'D', 'R', 'S'
     char nombre_libro[50];
     int isbn;
 } Solicitud;
@@ -23,27 +24,166 @@ typedef struct {
 } InfoLibro;
 
 typedef struct {
-    FILE* archivo_entrada;
-    int ejecucion;
-} Datos_hilo;
+    char operacion; // 'P', 'D', 'R'
+    char nombre_libro[50];
+    int isbn;
+    int ejemplar; // línea del ejemplar en el archivo
+    char fecha[20]; // dd-mm-yyyy
+} RegistroOperacion;
+
+// Variables globales para registro y control
+RegistroOperacion operaciones[MAX_OPERACIONES];
+int num_operaciones = 0;
+pthread_mutex_t mutex_operaciones = PTHREAD_MUTEX_INITIALIZER;
 
 Solicitud Buffer[BUFFER_SIZE];
 int in = 0;
 int out = 0;
+
 sem_t espacios_disponibles;
 sem_t solicitudes_pendientes;
 sem_t acceso_buffer;
+
 pthread_mutex_t mutex_archivo = PTHREAD_MUTEX_INITIALIZER;
 
-void enviar_respuesta(int fd_respuesta, const char* mensaje) {
+volatile int ejecucion_receptor = 1; // variable compartida para controlar ejecución
+
+typedef struct {
+    FILE* archivo_entrada;
+} Datos_hilo;
+
+// Declaraciones
+void agregar_operacion(char operacion, const char* nombre, int isbn, int ejemplar, const char* fecha);
+void* hilo_auxiliar01(void* arg);
+void* hilo_auxiliar02(void* arg);
+InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char estado_objetivo);
+int cambiar_estado_libro(FILE *archivo, int numero_linea, char nuevo_estado);
+int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo);
+void enviar_respuesta(int fd_respuesta, const char* mensaje);
+
+void agregar_operacion(char operacion, const char* nombre, int isbn, int ejemplar, const char* fecha) {
+    pthread_mutex_lock(&mutex_operaciones);
+    if (num_operaciones < MAX_OPERACIONES) {
+        operaciones[num_operaciones].operacion = operacion;
+        strncpy(operaciones[num_operaciones].nombre_libro, nombre, sizeof(operaciones[num_operaciones].nombre_libro) - 1);
+        operaciones[num_operaciones].nombre_libro[sizeof(operaciones[num_operaciones].nombre_libro) - 1] = '\0';
+        operaciones[num_operaciones].isbn = isbn;
+        operaciones[num_operaciones].ejemplar = ejemplar;
+        strncpy(operaciones[num_operaciones].fecha, fecha, sizeof(operaciones[num_operaciones].fecha) - 1);
+        operaciones[num_operaciones].fecha[sizeof(operaciones[num_operaciones].fecha) - 1] = '\0';
+        num_operaciones++;
+    }
+    pthread_mutex_unlock(&mutex_operaciones);
+}
+
+void* hilo_auxiliar01(void* arg) {
+    Datos_hilo* datos = (Datos_hilo*)arg;
+    FILE* archivo_entrada = datos->archivo_entrada;
+
+    int fd_respuesta = open("/tmp/pipe_respuesta", O_WRONLY);
     if (fd_respuesta == -1) {
-        perror("Error: pipe de respuesta no abierto");
-        return;
+        perror("Error al abrir pipe de respuesta en hilo_auxiliar01");
     }
-    ssize_t n = write(fd_respuesta, mensaje, strlen(mensaje));
-    if (n == -1) {
-        perror("Error al escribir en el pipe de respuesta");
+
+    while (ejecucion_receptor) {
+        sem_wait(&solicitudes_pendientes);
+        sem_wait(&acceso_buffer);
+
+        Solicitud solicitud = Buffer[out];
+        out = (out + 1) % BUFFER_SIZE;
+
+        sem_post(&acceso_buffer);
+        sem_post(&espacios_disponibles);
+
+        if (!ejecucion_receptor) break;
+
+        if (solicitud.operacion == 'D') {
+            InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P');
+            if (info.linea_ejemplar_estado != -1 && cambiar_estado_libro(archivo_entrada, info.linea_ejemplar_estado, 'D') == 1) {
+                actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 0);
+
+                // Formatear fecha actual
+                char fecha[20];
+                time_t t = time(NULL);
+                strftime(fecha, sizeof(fecha), "%d-%m-%Y", localtime(&t));
+
+                agregar_operacion('D', solicitud.nombre_libro, solicitud.isbn, info.linea_ejemplar_estado, fecha);
+
+                printf("Devolución exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue devuelto exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
+                enviar_respuesta(fd_respuesta, respuesta);
+            } else {
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Error al devolver el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
+                enviar_respuesta(fd_respuesta, respuesta);
+            }
+        } else if (solicitud.operacion == 'R') {
+            InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P');
+            if (info.linea_ejemplar_estado != -1 && actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 1) == 1) {
+
+                // Formatear fecha actual
+                char fecha[20];
+                time_t t = time(NULL);
+                strftime(fecha, sizeof(fecha), "%d-%m-%Y", localtime(&t));
+
+                agregar_operacion('R', solicitud.nombre_libro, solicitud.isbn, info.linea_ejemplar_estado, fecha);
+
+                printf("Renovación exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue renovado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
+                enviar_respuesta(fd_respuesta, respuesta);
+            } else {
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Error al renovar el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
+                enviar_respuesta(fd_respuesta, respuesta);
+            }
+        }
     }
+
+    if (fd_respuesta != -1) close(fd_respuesta);
+    return NULL;
+}
+
+void* hilo_auxiliar02(void* arg) {
+    (void)arg; // no usado
+
+    char comando;
+    while (ejecucion_receptor) {
+        printf("Ingrese comando (r para reporte, s para salir): ");
+        fflush(stdout);
+
+        comando = getchar();
+
+        // Limpiar buffer stdin
+        while(getchar() != '\n' && !feof(stdin));
+
+        if (comando == 'r') {
+            pthread_mutex_lock(&mutex_operaciones);
+            printf("\n--- REPORTE DE OPERACIONES REALIZADAS ---\n");
+            for (int i = 0; i < num_operaciones; i++) {
+                printf("%c, %s, ISBN %d, Ejemplar %d, Fecha: %s\n",
+                       operaciones[i].operacion,
+                       operaciones[i].nombre_libro,
+                       operaciones[i].isbn,
+                       operaciones[i].ejemplar,
+                       operaciones[i].fecha);
+            }
+            if (num_operaciones == 0)
+                printf("No se han registrado operaciones aún.\n");
+            printf("----------------------------------------\n");
+            pthread_mutex_unlock(&mutex_operaciones);
+        } else if (comando == 's') {
+            printf("Comando salir recibido. Terminando ejecución...\n");
+            ejecucion_receptor = 0;
+
+            // Liberar semáforos para que el hilo 1 no quede bloqueado
+            sem_post(&solicitudes_pendientes);
+        } else {
+            printf("Comando no reconocido. Intente nuevamente.\n");
+        }
+    }
+    return NULL;
 }
 
 InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char estado_objetivo) {
@@ -161,12 +301,20 @@ int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo) {
                 return 0;
             }
 
-            int offset_fecha = (int)(ultima_coma - linea + 2);
+            int offset_fecha = (int)(ultima_coma - linea + 1);
+
+            size_t longitud_original = strlen(linea) - offset_fecha;
 
             fseek(archivo, pos_inicio + offset_fecha, SEEK_SET);
-            fprintf(archivo, "%s \n", nueva_fecha);
-            fflush(archivo);
 
+            fprintf(archivo, "%s", nueva_fecha);
+
+            int espacios_a_borrar = (int)longitud_original - (int)strlen(nueva_fecha);
+            for (int i = 0; i < espacios_a_borrar; i++) {
+                fputc(' ', archivo);
+            }
+
+            fflush(archivo);
             pthread_mutex_unlock(&mutex_archivo);
             return 1;
         }
@@ -176,55 +324,15 @@ int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo) {
     return 0;
 }
 
-void* hilo_auxiliar01(void* arg) {
-    Datos_hilo* datos = (Datos_hilo*)arg;
-    FILE* archivo_entrada = datos->archivo_entrada;
-
-    int fd_respuesta = open("/tmp/pipe_respuesta", O_WRONLY);
+void enviar_respuesta(int fd_respuesta, const char* mensaje) {
     if (fd_respuesta == -1) {
-        perror("Error al abrir pipe de respuesta en hilo_auxiliar01");
+        perror("Error: pipe de respuesta no abierto");
+        return;
     }
-
-    while(datos->ejecucion) {
-        sem_wait(&solicitudes_pendientes);
-        sem_wait(&acceso_buffer);
-
-        Solicitud solicitud = Buffer[out];
-        out = (out + 1) % BUFFER_SIZE;
-
-        sem_post(&acceso_buffer);
-        sem_post(&espacios_disponibles);
-
-        if (solicitud.operacion == 'D') {
-            InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P');
-            if (info.linea_ejemplar_estado != -1 && cambiar_estado_libro(archivo_entrada, info.linea_ejemplar_estado, 'D') == 1) {
-                actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 0);
-                printf("Devolución exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
-                char respuesta[256];
-                snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue devuelto exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
-                enviar_respuesta(fd_respuesta, respuesta);
-            } else {
-                char respuesta[256];
-                snprintf(respuesta, sizeof(respuesta), "Error al devolver el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
-                enviar_respuesta(fd_respuesta, respuesta);
-            }
-        } else if (solicitud.operacion == 'R') {
-            InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P');
-            if (info.linea_ejemplar_estado != -1 && actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 1) == 1) {
-                printf("Renovación exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
-                char respuesta[256];
-                snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue renovado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
-                enviar_respuesta(fd_respuesta, respuesta);
-            } else {
-                char respuesta[256];
-                snprintf(respuesta, sizeof(respuesta), "Error al renovar el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
-                enviar_respuesta(fd_respuesta, respuesta);
-            }
-        }
+    ssize_t n = write(fd_respuesta, mensaje, strlen(mensaje));
+    if (n == -1) {
+        perror("Error al escribir en el pipe de respuesta");
     }
-
-    if (fd_respuesta != -1) close(fd_respuesta);
-    return NULL;
 }
 
 int main(int argc, char *argv[]) {
@@ -290,16 +398,20 @@ int main(int argc, char *argv[]) {
 
     pthread_mutex_init(&mutex_archivo, NULL);
 
-    int ejecucion = 1;
+    pthread_t hilo01, hilo02;
+    Datos_hilo datos_hilo01 = {archivo_entrada};
 
-    pthread_t hilo01;
-    Datos_hilo datos_hilo01 = {archivo_entrada, ejecucion};
     if (pthread_create(&hilo01, NULL, hilo_auxiliar01, (void*)&datos_hilo01) != 0) {
-        perror("Error al crear el hilo");
+        perror("Error al crear el hilo auxiliar 1");
         exit(EXIT_FAILURE);
     }
 
-    while(ejecucion) {
+    if (pthread_create(&hilo02, NULL, hilo_auxiliar02, NULL) != 0) {
+        perror("Error al crear el hilo auxiliar 2");
+        exit(EXIT_FAILURE);
+    }
+
+    while(ejecucion_receptor) {
         ssize_t read_bytes = read(fd, &solicitud, sizeof(Solicitud));
         if (read_bytes == 0) {
             printf("No hay más datos que leer del pipe.\n");
@@ -312,14 +424,24 @@ int main(int argc, char *argv[]) {
             exit(EXIT_FAILURE);
         }
 
+        if (!ejecucion_receptor) break;
+
         if (solicitud.operacion == 'Q') {
-            ejecucion = 0;
-            close(fd);
-            printf("Recibida solicitud de salida. Saliendo del sistema...\n");
+            printf("Recibida solicitud de salida. Terminando...\n");
+            ejecucion_receptor = 0;
+            sem_post(&solicitudes_pendientes);
             break;
         } else if (solicitud.operacion == 'P') {
             InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'D');
             if (info.linea_ejemplar_estado != -1 && cambiar_estado_libro(archivo_entrada, info.linea_ejemplar_estado, 'P') == 1) {
+
+                // Fecha actual
+                char fecha[20];
+                time_t t = time(NULL);
+                strftime(fecha, sizeof(fecha), "%d-%m-%Y", localtime(&t));
+
+                agregar_operacion('P', solicitud.nombre_libro, solicitud.isbn, info.linea_ejemplar_estado, fecha);
+
                 printf("Préstamo exitoso del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
                 char respuesta[256];
                 snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue prestado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
@@ -343,7 +465,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Esperar que los hilos terminen
     pthread_join(hilo01, NULL);
+    pthread_join(hilo02, NULL);
 
     close(fd_respuesta);
     close(fd);
@@ -353,7 +477,8 @@ int main(int argc, char *argv[]) {
     sem_destroy(&solicitudes_pendientes);
     sem_destroy(&acceso_buffer);
     pthread_mutex_destroy(&mutex_archivo);
+    pthread_mutex_destroy(&mutex_operaciones);
 
+    printf("Receptor finalizado.\n");
     return 0;
 }
-
