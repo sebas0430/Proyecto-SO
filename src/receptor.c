@@ -10,40 +10,31 @@
 
 #define BUFFER_SIZE 10
 
-// Declaracion de estructuras
 typedef struct {
-    char operacion; // 'Q' salida, 'P' prestamo, 'D' devolucion, 'R' renovar
+    char operacion; // 'Q', 'P', 'D', 'R'
     char nombre_libro[50];
     int isbn;
 } Solicitud;
 
 typedef struct {
-    int linea_encabezado; // linea del encabezado del libro, es -1 si no se encontró
-    int cantidad_ejemplares; // cantidad de ejemplares del libro
-    int linea_ejemplar_estado; // linea donde esta el libro con el estado que se busca, es -1 si no se encontró
+    int linea_encabezado;
+    int cantidad_ejemplares;
+    int linea_ejemplar_estado;
 } InfoLibro;
 
 typedef struct {
-    FILE* archivo_entrada; // puntero al archivo de la base de datos
-    int ejecucion; // variable para controlar la ejecución del hilo
-} Datos_hilo; // estructura para pasar datos a los hilos 
+    FILE* archivo_entrada;
+    int ejecucion;
+} Datos_hilo;
 
-// Variables globales
-Solicitud Buffer[BUFFER_SIZE]; // buffer para almacenar las solicitudes
-int in = 0; // indice de entrada
-int out = 0; // indice de salida
-sem_t espacios_disponibles; // semaforo para controlar los espacios disponibles en el buffer
-sem_t solicitudes_pendientes; // semaforo para controlar las solicitudes que estan en la lista
-sem_t acceso_buffer; // semaforo para controlar el acceso al buffer
-pthread_mutex_t mutex_archivo = PTHREAD_MUTEX_INITIALIZER; // mutex para proteger el archivo
+Solicitud Buffer[BUFFER_SIZE];
+int in = 0;
+int out = 0;
+sem_t espacios_disponibles;
+sem_t solicitudes_pendientes;
+sem_t acceso_buffer;
+pthread_mutex_t mutex_archivo = PTHREAD_MUTEX_INITIALIZER;
 
-// Declaracion de funciones
-void* hilo_auxiliar01(void* arg);
-InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char estado_objetivo);
-int cambiar_estado_libro(FILE *archivo, int numero_linea, char nuevo_estado);
-int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo);
-
-// Enviar respuesta al pipe
 void enviar_respuesta(int fd_respuesta, const char* mensaje) {
     if (fd_respuesta == -1) {
         perror("Error: pipe de respuesta no abierto");
@@ -53,85 +44,6 @@ void enviar_respuesta(int fd_respuesta, const char* mensaje) {
     if (n == -1) {
         perror("Error al escribir en el pipe de respuesta");
     }
-}
-
-void* hilo_auxiliar01(void* arg) {
-    Datos_hilo* datos = (Datos_hilo*)arg;
-    FILE* archivo_entrada = datos->archivo_entrada;
-
-    int fd_respuesta = open("/tmp/pipe_respuesta", O_WRONLY);
-    if (fd_respuesta == -1) {
-        perror("Error al abrir pipe de respuesta en hilo_auxiliar01");
-        // Decidir si continuar o salir
-        // Aquí continuamos para no bloquear el hilo
-    }
-
-    while(datos->ejecucion) {
-        sem_wait(&solicitudes_pendientes);
-        sem_wait(&acceso_buffer);
-
-        Solicitud solicitud = Buffer[out];
-        out = (out + 1) % BUFFER_SIZE;
-
-        sem_post(&acceso_buffer);
-        sem_post(&espacios_disponibles);
-
-        switch(solicitud.operacion) {
-            case 'D': {
-                InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P');
-                if (info.linea_ejemplar_estado != -1 && cambiar_estado_libro(archivo_entrada, info.linea_ejemplar_estado, 'D') == 1) {
-                    actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 0);
-                    printf("Devolución exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
-                    char respuesta[256];
-                    snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue devuelto exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
-                    enviar_respuesta(fd_respuesta, respuesta);
-                } else {
-                    char respuesta[256];
-                    snprintf(respuesta, sizeof(respuesta), "Error al devolver el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
-                    enviar_respuesta(fd_respuesta, respuesta);
-                }
-                break;
-            }
-            case 'R': {
-                InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P');
-                if (info.linea_ejemplar_estado != -1 && actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 1) == 1) {
-                    printf("Renovación exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
-                    char respuesta[256];
-                    snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue renovado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
-                    enviar_respuesta(fd_respuesta, respuesta);
-                } else {
-                    char respuesta[256];
-                    snprintf(respuesta, sizeof(respuesta), "Error al renovar el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
-                    enviar_respuesta(fd_respuesta, respuesta);
-                }
-                break;
-            }
-            case 'P': {
-                InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'D');
-                if (info.linea_ejemplar_estado != -1 && cambiar_estado_libro(archivo_entrada, info.linea_ejemplar_estado, 'P') == 1) {
-                    printf("Préstamo exitoso del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
-                    char respuesta[256];
-                    snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue prestado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
-                    enviar_respuesta(fd_respuesta, respuesta);
-                } else {
-                    char respuesta[256];
-                    snprintf(respuesta, sizeof(respuesta), "Error al prestar el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
-                    enviar_respuesta(fd_respuesta, respuesta);
-                }
-                break;
-            }
-            case 'Q': {
-                datos->ejecucion = 0;
-                break;
-            }
-            default:
-                printf("Operación desconocida: %c\n", solicitud.operacion);
-                break;
-        }
-    }
-
-    if (fd_respuesta != -1) close(fd_respuesta);
-    return NULL;
 }
 
 InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char estado_objetivo) {
@@ -264,6 +176,57 @@ int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo) {
     return 0;
 }
 
+void* hilo_auxiliar01(void* arg) {
+    Datos_hilo* datos = (Datos_hilo*)arg;
+    FILE* archivo_entrada = datos->archivo_entrada;
+
+    int fd_respuesta = open("/tmp/pipe_respuesta", O_WRONLY);
+    if (fd_respuesta == -1) {
+        perror("Error al abrir pipe de respuesta en hilo_auxiliar01");
+    }
+
+    while(datos->ejecucion) {
+        sem_wait(&solicitudes_pendientes);
+        sem_wait(&acceso_buffer);
+
+        Solicitud solicitud = Buffer[out];
+        out = (out + 1) % BUFFER_SIZE;
+
+        sem_post(&acceso_buffer);
+        sem_post(&espacios_disponibles);
+
+        if (solicitud.operacion == 'D') {
+            InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P');
+            if (info.linea_ejemplar_estado != -1 && cambiar_estado_libro(archivo_entrada, info.linea_ejemplar_estado, 'D') == 1) {
+                actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 0);
+                printf("Devolución exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue devuelto exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
+                enviar_respuesta(fd_respuesta, respuesta);
+            } else {
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Error al devolver el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
+                enviar_respuesta(fd_respuesta, respuesta);
+            }
+        } else if (solicitud.operacion == 'R') {
+            InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'P');
+            if (info.linea_ejemplar_estado != -1 && actualizar_fecha_linea(archivo_entrada, info.linea_ejemplar_estado, 1) == 1) {
+                printf("Renovación exitosa del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue renovado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
+                enviar_respuesta(fd_respuesta, respuesta);
+            } else {
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Error al renovar el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
+                enviar_respuesta(fd_respuesta, respuesta);
+            }
+        }
+    }
+
+    if (fd_respuesta != -1) close(fd_respuesta);
+    return NULL;
+}
+
 int main(int argc, char *argv[]) {
     char fifo_respuesta[50] = "/tmp/pipe_respuesta";
     char* nombre_pipe = NULL;
@@ -288,8 +251,6 @@ int main(int argc, char *argv[]) {
     char fifo_file[64];
     snprintf(fifo_file, sizeof(fifo_file), "/tmp/%s", nombre_pipe);
 
-    // Crear pipes si no existen
-    printf("Creando pipes...\n");
     if (access(fifo_file, F_OK) == -1 && mkfifo(fifo_file, 0660) == -1) {
         perror("Error al crear pipe de solicitud");
         exit(EXIT_FAILURE);
@@ -299,20 +260,16 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Abrir pipes
     int fd = open(fifo_file, O_RDONLY);
     if (fd == -1) {
         perror("Error al abrir pipe de solicitud");
         exit(EXIT_FAILURE);
     }
-    printf("Pipe de solicitud abierto.\n");
-
     int fd_respuesta = open(fifo_respuesta, O_WRONLY);
     if (fd_respuesta == -1) {
         perror("Error al abrir pipe de respuesta");
         exit(EXIT_FAILURE);
     }
-    printf("Pipe de respuesta abierto.\n");
 
     FILE* archivo_entrada = fopen(nombre_archivo, "r+");
     if (!archivo_entrada) {
@@ -327,7 +284,6 @@ int main(int argc, char *argv[]) {
 
     printf("====Bienvenido al sistema receptor de solicitudes====\n\n");
 
-    // Inicializar semáforos
     sem_init(&espacios_disponibles, 0, BUFFER_SIZE);
     sem_init(&solicitudes_pendientes, 0, 0);
     sem_init(&acceso_buffer, 0, 1);
@@ -361,31 +317,33 @@ int main(int argc, char *argv[]) {
             close(fd);
             printf("Recibida solicitud de salida. Saliendo del sistema...\n");
             break;
+        } else if (solicitud.operacion == 'P') {
+            InfoLibro info = buscar_info_libro(archivo_entrada, solicitud.nombre_libro, solicitud.isbn, 'D');
+            if (info.linea_ejemplar_estado != -1 && cambiar_estado_libro(archivo_entrada, info.linea_ejemplar_estado, 'P') == 1) {
+                printf("Préstamo exitoso del libro: %s con ISBN: %d\n", solicitud.nombre_libro, solicitud.isbn);
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Libro %s con ISBN %d fue prestado exitosamente.\n", solicitud.nombre_libro, solicitud.isbn);
+                write(fd_respuesta, respuesta, strlen(respuesta));
+            } else {
+                char respuesta[256];
+                snprintf(respuesta, sizeof(respuesta), "Error al prestar el libro %s con ISBN %d.\n", solicitud.nombre_libro, solicitud.isbn);
+                write(fd_respuesta, respuesta, strlen(respuesta));
+            }
+        } else if (solicitud.operacion == 'D' || solicitud.operacion == 'R') {
+            sem_wait(&espacios_disponibles);
+            sem_wait(&acceso_buffer);
+
+            Buffer[in] = solicitud;
+            in = (in + 1) % BUFFER_SIZE;
+
+            sem_post(&acceso_buffer);
+            sem_post(&solicitudes_pendientes);
+        } else {
+            printf("Operación desconocida en main: %c\n", solicitud.operacion);
         }
-
-        // Enviar mensaje inicial al pipe de respuesta
-        char mensaje[256];
-        snprintf(mensaje, sizeof(mensaje), "Solicitud de %c recibida para el libro: %s con ISBN: %d\n",
-                 solicitud.operacion, solicitud.nombre_libro, solicitud.isbn);
-        ssize_t write_bytes = write(fd_respuesta, mensaje, strlen(mensaje));
-        if (write_bytes == -1) {
-            perror("Error al escribir en el pipe");
-            exit(EXIT_FAILURE);
-        }
-
-        sem_wait(&espacios_disponibles);
-        sem_wait(&acceso_buffer);
-
-        Buffer[in] = solicitud;
-        in = (in + 1) % BUFFER_SIZE;
-        printf("Solicitud almacenada en el buffer. ISBN: %d\n", solicitud.isbn);
-
-        sem_post(&acceso_buffer);
-        sem_post(&solicitudes_pendientes);
     }
 
     pthread_join(hilo01, NULL);
-    printf("Hilo auxiliar01 terminado.\n");
 
     close(fd_respuesta);
     close(fd);
@@ -398,3 +356,4 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
+
