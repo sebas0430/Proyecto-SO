@@ -301,13 +301,13 @@ int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo) { // funci
                 return 0;
             }
 
-            int offset_fecha = (int)(ultima_coma - linea + 1); //  calcular el offset de la fecha
+            int offset_fecha = (int)(ultima_coma - linea + 1);
 
            
 
             fseek(archivo, pos_inicio + offset_fecha, SEEK_SET); // mover el puntero del archivo a la posición de la fecha
 
-            fprintf(archivo, "%s\n", nueva_fecha); // escribir la nueva fecha en el archivo
+            fprintf(archivo, "%s\n\n", nueva_fecha); // escribir la nueva fecha en el archivo
 
 
             fflush(archivo); // asegurar que los cambios se escriban en el archivo
