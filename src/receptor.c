@@ -303,16 +303,12 @@ int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo) {
 
             int offset_fecha = (int)(ultima_coma - linea + 1);
 
-            size_t longitud_original = strlen(linea) - offset_fecha;
+           
 
             fseek(archivo, pos_inicio + offset_fecha, SEEK_SET);
 
-            fprintf(archivo, "%s", nueva_fecha);
+            fprintf(archivo, "%s\n", nueva_fecha);
 
-            int espacios_a_borrar = (int)longitud_original - (int)strlen(nueva_fecha);
-            for (int i = 0; i < espacios_a_borrar; i++) {
-                fputc(' ', archivo);
-            }
 
             fflush(archivo);
             pthread_mutex_unlock(&mutex_archivo);
