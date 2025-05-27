@@ -72,28 +72,43 @@ void agregar_operacion(char operacion, const char* nombre, int isbn, int ejempla
         strncpy(operaciones[num_operaciones].fecha, fecha, sizeof(operaciones[num_operaciones].fecha) - 1); // copiar fecha
         operaciones[num_operaciones].fecha[sizeof(operaciones[num_operaciones].fecha) - 1] = '\0'; // asegurar terminación de cadena
         num_operaciones++; // incrementar contador de operaciones
+void agregar_operacion(char operacion, const char* nombre, int isbn, int ejemplar, const char* fecha) { // función para agregar una operación al registro
+    pthread_mutex_lock(&mutex_operaciones); // proteger acceso a operaciones
+    if (num_operaciones < MAX_OPERACIONES) { // verificar si hay espacio en el registro
+        operaciones[num_operaciones].operacion = operacion; // asignar operación
+        strncpy(operaciones[num_operaciones].nombre_libro, nombre, sizeof(operaciones[num_operaciones].nombre_libro) - 1); // copiar nombre del libro
+        operaciones[num_operaciones].nombre_libro[sizeof(operaciones[num_operaciones].nombre_libro) - 1] = '\0'; // asegurar terminación de cadena
+        operaciones[num_operaciones].isbn = isbn; // asignar ISBN
+        operaciones[num_operaciones].ejemplar = ejemplar; // asignar línea del ejemplar
+        strncpy(operaciones[num_operaciones].fecha, fecha, sizeof(operaciones[num_operaciones].fecha) - 1); // copiar fecha
+        operaciones[num_operaciones].fecha[sizeof(operaciones[num_operaciones].fecha) - 1] = '\0'; // asegurar terminación de cadena
+        num_operaciones++; // incrementar contador de operaciones
     }
+    pthread_mutex_unlock(&mutex_operaciones); // liberar mutex
     pthread_mutex_unlock(&mutex_operaciones); // liberar mutex
 }
 
 void* hilo_auxiliar01(void* arg) { // hilo auxiliar para manejar solicitudes de devolución y renovación
     Datos_hilo* datos = (Datos_hilo*)arg; // recibir datos del hilo
     FILE* archivo_entrada = datos->archivo_entrada; // archivo de base de datos
+void* hilo_auxiliar01(void* arg) { // hilo auxiliar para manejar solicitudes de devolución y renovación
+    Datos_hilo* datos = (Datos_hilo*)arg; // recibir datos del hilo
+    FILE* archivo_entrada = datos->archivo_entrada; // archivo de base de datos
 
-    int fd_respuesta = open("/tmp/pipe_respuesta", O_WRONLY); // abrir pipe de respuesta
+    int fd_respuesta = open("/tmp/pipe_respuesta", O_WRONLY); // abrir pipe de respuesta // abrir pipe de respuesta
     if (fd_respuesta == -1) {
         perror("Error al abrir pipe de respuesta en hilo_auxiliar01");
     }
 
-    while (ejecucion_receptor) { // ciclo principal del hilo
-        sem_wait(&solicitudes_pendientes);// esperar por solicitudes pendientes
-        sem_wait(&acceso_buffer); // asegurar acceso al buffer
+    while (ejecucion_receptor) { // ciclo principal del hilo // ciclo principal del hilo
+        sem_wait(&solicitudes_pendientes);// esperar por solicitudes pendientes// esperar por solicitudes pendientes
+        sem_wait(&acceso_buffer); // asegurar acceso al buffer // asegurar acceso al buffer
 
-        Solicitud solicitud = Buffer[out]; // obtener solicitud del buffer
-        out = (out + 1) % BUFFER_SIZE; // actualizar índice de salida
+        Solicitud solicitud = Buffer[out]; // obtener solicitud del buffer // obtener solicitud del buffer
+        out = (out + 1) % BUFFER_SIZE; // actualizar índice de salida // actualizar índice de salida
 
-        sem_post(&acceso_buffer); // liberar acceso al buffer
-        sem_post(&espacios_disponibles); // liberar un espacio en el buffer
+        sem_post(&acceso_buffer); // liberar acceso al buffer // liberar acceso al buffer
+        sem_post(&espacios_disponibles); // liberar un espacio en el buffer // liberar un espacio en el buffer
 
         if (!ejecucion_receptor) break; // verificar si se debe salir
 
@@ -301,13 +316,13 @@ int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo) { // funci
                 return 0;
             }
 
-            int offset_fecha = (int)(ultima_coma - linea + 1);
+            int offset_fecha = (int)(ultima_coma - linea + 1); //  calcular el offset de la fecha
 
            
 
             fseek(archivo, pos_inicio + offset_fecha, SEEK_SET); // mover el puntero del archivo a la posición de la fecha
 
-            fprintf(archivo, "%s\n\n", nueva_fecha); // escribir la nueva fecha en el archivo
+            fprintf(archivo, "%s\n\n", nueva_fecha); // escribir la nueva fecha en el archivo // escribir la nueva fecha en el archivo
 
 
             fflush(archivo); // asegurar que los cambios se escriban en el archivo
