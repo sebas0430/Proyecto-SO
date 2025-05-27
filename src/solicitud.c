@@ -37,9 +37,8 @@ Solicitud leer_solicitud_teclado() { // función para leer la solicitud desde el
     }
     if(s.operacion == 'Q') return s; // en caso de salir, no se pide más información
 
-    scanf(" %49[^\n]", s.nombre_libro); // leer el nombre del libro con límite
     printf("Ingrese el nombre del libro: ");
-    scanf(" %49[^\n]", s.nombre_libro); // leer el nombre del libro con límite
+    scanf(" %[^\n]", s.nombre_libro); // leer el nombre del libro
     printf("Ingrese el código del libro: ");
     scanf(" %d", &s.isbn); // leer el código del libro
 
@@ -102,6 +101,8 @@ int main(int argc, char *argv[]) {
             if (sscanf(linea, " %c , %49[^,] , %d", &s.operacion, s.nombre_libro, &s.isbn) == 3) { // leer la operación, el nombre del libro y el ISBN
                 printf("Enviando solicitud de %c para libro '%s' con código %d...\n", s.operacion, s.nombre_libro, s.isbn); // imprimir mensaje de confirmación
                 if (s.operacion == 'Q') break; // si la operación es 'Q' salir del bucle
+                s.nombre_libro[0] = '\0';  // Limpiar el nombre del libro 
+                s.isbn = 0; // Limpiar el ISBN
                 enviar_solicitud(pipe_fd, s); // se envia la solicitud al receptor
             } 
         }
