@@ -55,9 +55,9 @@ El sistema fue validado con múltiples casos: préstamo, devolución, renovació
 
 ##  Autores
 
-SEBASTIÁN SÁNCHEZ OLAYA
-TOMÁS OSPINA ULLOA
-DAVID SANTIAGO RODRÍGUEZ PRIETO 
-IVÁN CORTÉS CONSTAIN
+- SEBASTIÁN SÁNCHEZ OLAYA
+- TOMÁS OSPINA ULLOA
+- DAVID SANTIAGO RODRÍGUEZ PRIETO
+- IVÁN CORTÉS CONSTAIN
 
 
