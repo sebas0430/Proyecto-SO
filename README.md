@@ -9,7 +9,6 @@ Proyecto-SO/
 ├── receptor.c           # Proceso receptor que administra solicitudes y actualiza la base de datos
 ├── solicitante.c        # Proceso solicitante, modo interactivo o lectura desde archivo
 ├── db_file.txt          # Base de datos con libros y ejemplares
-├── solicitudes.txt      # Archivo con solicitudes de prueba
 ├── makefile             # Script de compilación
 └── README.md            # Este archivo
 ```
