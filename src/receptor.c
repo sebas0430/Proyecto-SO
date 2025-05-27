@@ -13,7 +13,7 @@
 
 //declaracion de estructuras
 typedef struct {
-    char operacion; // 'Q' salida, 'P' prestamo, 'D' devolucion, 'R' renovar
+    char operacion; // 'Q' salida, 'P' prestamo, 'D' devolucion, 'R' renovar, 'I' informe/reporte
     char nombre_libro[50];
     int isbn;
 } Solicitud;
@@ -46,10 +46,50 @@ void* hilo_auxiliar02(void* arg); // declaración de la función del hilo auxili
 InfoLibro buscar_info_libro(FILE *archivo, const char *nombre, int isbn, char estado_objetivo); // declaración de la función para buscar información del libro
 int cambiar_estado_libro(FILE *archivo, int numero_linea, char nuevo_estado); // declaración de la función para actualizar el estado de un libro segun la línea 
 int actualizar_fecha_linea(FILE *archivo, int numero_linea, int modo); // declaración de la función para actualizar la fecha de un libro segun la solicitud
+void mostrar_uso();
+void imprimir_reporte(const char* path);
 
 
 
 //FUNCIONES 
+//Función de mostrar uso en la ejecución del programa por consola
+void mostrar_uso() {
+    printf("\nModo de uso:\n");
+    printf("  ./receptor -p <pipe_nombre> -f <archivo_BD> [-v] [-s <archivo_salida>] [-h]\n");
+    printf("\nOpciones:\n");
+    printf("  -p     Nombre del pipe nominal\n");
+    printf("  -f     Archivo de base de datos\n");
+    printf("  -v     Modo verbose: muestra todas las operaciones recibidas\n");
+    printf("  -s     Archivo de salida con el estado final de la BD\n");
+    printf("  -h     Muestra esta ayuda\n\n");
+}
+
+//Función para imprimir el reporte de cómo quedó la BDD
+void imprimir_reporte(const char* path) {
+    FILE* archivo = fopen(path, "r");
+    if (!archivo) {
+        perror("Error abriendo base de datos para reporte");
+        return;
+    }
+    char linea[256];
+    char nombre[50];
+    int isbn, ejemplares;
+
+    while (fgets(linea, sizeof(linea), archivo)) {
+        if (sscanf(linea, "%49[^,], %d, %d", nombre, &isbn, &ejemplares) == 3) {
+            for (int i = 0; i < ejemplares; i++) {
+                if (!fgets(linea, sizeof(linea), archivo)) break;
+                int ejemplar;
+                char status;
+                char fecha[32];
+                sscanf(linea, "%d, %c, %31[^\n]", &ejemplar, &status, fecha);
+                printf("%c, %s, %d, %d, %s\n", status, nombre, isbn, ejemplar, fecha);
+            }
+        }
+    }
+    fclose(archivo);
+}
+
 void* hilo_auxiliar01(void* arg) {
     Datos_hilo* datos = (Datos_hilo*)arg; // convertir el argumento a la estructura de datos
     FILE* archivo_entrada = datos->archivo_entrada; // obtener el puntero al archivo de la base de datos
@@ -267,9 +307,14 @@ int main(int argc, char *argv[]) {
             nombre_archivo = argv[++i];
         else if (strcmp(argv[i], "-v") == 0)
             verbose = 1;
+        else if (strcmp(argv[i], "-h") == 0) { 
+            mostrar_uso(); 
+            return 0; 
+        }
     }
 
     if (!nombre_pipe || !nombre_archivo) {
+        mostrar_uso();
         fprintf(stderr, "Uso: %s -p <pipe> -f <archivo_BD>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
@@ -407,6 +452,9 @@ int main(int argc, char *argv[]) {
                 }
                        
                     }
+                else if (solicitud.operacion == 'I') { // Solicitud de informe
+                    imprimir_reporte(archivo_bd);
+                }
             }
     
         // Esperar a que el hilo termine
