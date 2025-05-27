@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 
 typedef struct { // estructura para almacenar la solicitud
-    char operacion; // 'P', 'D', 'R', 'Q'
+    char operacion; // 'P', 'D', 'R', 'Q', 'I' informe/reporte
     char nombre_libro[50];
     int isbn;
 } Solicitud;
@@ -16,7 +16,8 @@ void mostrar_menu() { // función para mostrar el menú de opciones
     printf("1. Solicitar préstamo de un libro (P)\n");
     printf("2. Renovar un libro (R)\n");
     printf("3. Devolver un libro (D)\n");
-    printf("4. Salir(Q)\n");
+    printf("4. Generar informe (I)\n");
+    printf("5. Salir (Q)\n");
     printf("Seleccione una opción: ");
 }
 
@@ -30,13 +31,18 @@ Solicitud leer_solicitud_teclado() { // función para leer la solicitud desde el
         case '1': s.operacion = 'P'; break;
         case '2': s.operacion = 'R'; break;
         case '3': s.operacion = 'D'; break;
-        case '4': s.operacion = 'Q'; break;
+        case '4': s.operacion = 'I'; break; 
+        case '5': s.operacion = 'Q'; break;
         default:
             printf("Opción no válida. Intente nuevamente.\n");
             return leer_solicitud_teclado();
     }
-    if(s.operacion == 'Q') return s; // en caso de salir, no se pide más información
-
+    //Función salir y reporte/informe para ser procesadas como comando interno 
+    if(s.operacion == 'Q' || s.operacion == 'I'){
+        strcpy(s.nombre_libro, "Comando interno");
+        s.isbn = 0;
+        return s; // en caso de salir, no se pide más información
+    }
     printf("Ingrese el nombre del libro: ");
     scanf(" %[^\n]", s.nombre_libro); // leer el nombre del libro
     printf("Ingrese el código del libro: ");
@@ -51,6 +57,16 @@ void enviar_solicitud(int pipe_fd, Solicitud solicitud) {
     }
 }
 
+//Función para mostrar el uso correcto del sistema al momento de ejecutarlo en consola
+void mostrar_uso(const char* nombre_prog) {
+    printf("\nModo de uso:\n");
+    printf("  %s -p <pipe_nombre> [-i <archivo_entrada>]\n", nombre_prog);
+    printf("\nOpciones:\n");
+    printf("  -p     Nombre del pipe nominal (obligatorio)\n");
+    printf("  -i     Archivo de entrada con operaciones (opcional)\n");
+    printf("\nSi no se especifica -i, se usará modo interactivo por menú.\n\n");
+}
+
 int main(int argc, char *argv[]) {
     char* nombre_pipe = NULL;
     char* input_file = NULL;
@@ -60,10 +76,14 @@ int main(int argc, char *argv[]) {
             nombre_pipe = argv[++i]; // asignar el nombre del pipe
         else if (strcmp(argv[i], "-i") == 0 && i + 1 < argc) // si se encuentra la opción -i
             input_file = argv[++i]; // asignar el nombre del archivo de entrada
+        else if (strcmp(argv[i], "-h") == 0) { //si se encuentra la opción -h
+            mostrar_uso(argv[0]); //Se muestra el uso del programa
+            return 0;
+        }
     }
 
     if (!nombre_pipe) {
-        fprintf(stderr, "Uso: %s -p <nombre_pipe> -i(opcional) <input_file>\n", argv[0]);
+        mostrar_uso(argv[0]);
         return 1;
     }
 
